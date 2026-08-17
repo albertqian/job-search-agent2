@@ -1,0 +1,33 @@
+name: Job Leads — Daily Email
+
+on:
+  schedule:
+    - cron: "0 16 * * 1-5"   # 9 AM Pacific, weekdays only
+
+  workflow_dispatch:          # manual trigger from Actions UI
+
+jobs:
+  scrape-and-email:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Scrape Craigslist jobs
+        run: python job_scraper.py
+
+      - name: Send email digest
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+          TO_ADDRESS:     ${{ secrets.TO_ADDRESS }}
+        run: python send_email.py
