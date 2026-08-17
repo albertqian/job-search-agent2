@@ -1,189 +1,137 @@
 """
 job_scraper.py
-Scrapes Craigslist SF Bay Area for product marketing roles.
+Fetches product marketing jobs from RemoteOK's public API.
+No scraping, no API key, no blocking.
 Writes results to data/job_results.json for send_email.py to consume.
 """
 
 import json
-import re
-import time
-import random
 import requests
 from datetime import datetime
 from pathlib import Path
-from bs4 import BeautifulSoup
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": "job-leads-agent/1.0 (personal job search tool)",
 }
 
 OUTPUT_PATH = Path("data/job_results.json")
 
-QUERIES = [
-    "product marketing manager",
+# RemoteOK API tags to search — fetches each and merges
+TAGS = [
+    "marketing",
+    "product",
+    "manager",
+]
+
+KEYWORDS = [
     "product marketing",
-    "PMM",
-    "go to market manager",
-    "senior product marketing",
+    "pmm",
+    "product manager",
+    "go to market",
+    "gtm",
+    "growth marketing",
+    "content marketing manager",
 ]
 
 
-def scrape_craigslist_jobs(query: str, max_results: int = 25) -> list[dict]:
-    results = []
-    url = (
-        f"https://sfbay.craigslist.org/search/jjj"
-        f"?query={requests.utils.quote(query)}&sort=date"
-    )
-
-    print(f"[CL] Fetching: {url}")
+def fetch_remoteok(tag: str) -> list[dict]:
+    """Fetch jobs from RemoteOK API for a given tag."""
+    url = f"https://remoteok.com/api?tag={tag}"
+    print(f"[RemoteOK] Fetching: {url}")
 
     try:
         resp = requests.get(url, headers=HEADERS, timeout=12)
         resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"[CL] Request failed: {e}")
-        return results
-
-    soup = BeautifulSoup(resp.text, "html.parser")
-    listings = soup.select("li.cl-search-result")
-    print(f"[CL] Found {len(listings)} raw listings for '{query}'")
-
-    for listing in listings[:max_results]:
-        try:
-            title_el = listing.select_one("a.cl-app-anchor span.label")
-            date_el  = listing.select_one("div.meta span.date, time")
-            link_el  = listing.select_one("a.cl-app-anchor")
-            meta_el  = listing.select_one(".meta")
-
-            title    = title_el.get_text(strip=True) if title_el else "Unknown"
-            date_raw = date_el.get("datetime", date_el.get_text(strip=True)) if date_el else ""
-            url      = link_el["href"] if link_el else ""
-            meta     = meta_el.get_text(" ", strip=True) if meta_el else ""
-            salary   = extract_salary(title + " " + meta)
-
-            results.append({
-                "title":      title,
-                "company":    None,
-                "salary":     salary,
-                "location":   "San Francisco, CA",
-                "url":        url,
-                "posted":     format_date(date_raw),
-                "query":      query,
-                "scraped_at": datetime.now().isoformat(),
-            })
-
-        except Exception as e:
-            print(f"[CL] Parse error: {e}")
-            continue
-
-    return results
+        data = resp.json()
+        # First item is always a legal notice dict, skip it
+        jobs = [j for j in data if isinstance(j, dict) and j.get("id")]
+        print(f"[RemoteOK] Found {len(jobs)} jobs for tag '{tag}'")
+        return jobs
+    except Exception as e:
+        print(f"[RemoteOK] Failed for tag '{tag}': {e}")
+        return []
 
 
-def enrich_listings(listings: list[dict], max_enrich: int = 15) -> list[dict]:
-    """Visit individual listing pages to extract company and salary."""
-    for listing in listings[:max_enrich]:
-        if not listing.get("url"):
-            continue
-        try:
-            resp = requests.get(listing["url"], headers=HEADERS, timeout=10)
-            soup = BeautifulSoup(resp.text, "html.parser")
+def is_relevant(job: dict) -> bool:
+    """Filter jobs to product marketing relevant roles."""
+    title = job.get("position", "").lower()
+    tags  = " ".join(job.get("tags", [])).lower()
+    text  = title + " " + tags
 
-            body  = soup.select_one("#postingbody")
-            attrs = soup.select_one(".attrgroup")
-            body_text = (body.get_text(" ", strip=True) if body else "") + \
-                        (attrs.get_text(" ", strip=True) if attrs else "")
-
-            if not listing["salary"]:
-                listing["salary"] = extract_salary(body_text)
-            if not listing["company"]:
-                listing["company"] = extract_company(body_text)
-
-            time.sleep(random.uniform(0.8, 1.5))
-        except Exception:
-            continue
-    return listings
+    return any(kw in text for kw in KEYWORDS)
 
 
-def extract_salary(text: str) -> str | None:
-    patterns = [
-        r"\$[\d,]+\s*(?:[-–]\s*\$[\d,]+)?\s*(?:\/\s*(?:hr|hour|year|yr|annually|mo|month))?",
-        r"[\d,]+k?\s*(?:[-–]\s*[\d,]+k?)?\s*(?:per|\/)\s*(?:hr|hour|year|yr|mo|month)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group().strip()
-    return None
+def format_job(job: dict) -> dict:
+    """Normalize a RemoteOK job into our standard schema."""
+    # Salary: RemoteOK provides min/max as integers
+    salary_min = job.get("salary_min")
+    salary_max = job.get("salary_max")
+    if salary_min and salary_max:
+        salary = f"${salary_min:,} – ${salary_max:,} / yr"
+    elif salary_min:
+        salary = f"${salary_min:,}+ / yr"
+    else:
+        salary = None
 
+    # Date
+    epoch = job.get("epoch")
+    posted = (
+        datetime.utcfromtimestamp(epoch).strftime("%b %d, %Y")
+        if epoch else ""
+    )
 
-def extract_company(text: str) -> str | None:
-    patterns = [
-        r"(?:company|employer|organization|firm)[:\s]+([A-Z][A-Za-z0-9\s&,\.]{2,40})",
-        r"(?:at|@|with|for)\s+([A-Z][A-Za-z0-9\s&]{2,30})(?:\s+is|\s+are|\s+we|\.|,)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            candidate = match.group(1).strip()
-            noise = {"we", "our", "the", "a", "an", "this", "that"}
-            if candidate.lower() not in noise and len(candidate) > 2:
-                return candidate
-    return None
-
-
-def format_date(date_str: str) -> str:
-    if not date_str:
-        return ""
-    try:
-        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-        return dt.strftime("%b %d, %Y")
-    except ValueError:
-        return date_str.strip()
+    return {
+        "title":      job.get("position", "Unknown"),
+        "company":    job.get("company", None),
+        "salary":     salary,
+        "location":   "Remote",
+        "url":        job.get("url", f"https://remoteok.com/l/{job.get('id', '')}"),
+        "posted":     posted,
+        "tags":       ", ".join(job.get("tags", [])[:5]),
+        "scraped_at": datetime.now().isoformat(),
+    }
 
 
 def run_scraper():
-    all_results = []
+    all_jobs = []
 
-    for query in QUERIES:
-        results = scrape_craigslist_jobs(query, max_results=25)
-        all_results.extend(results)
-        time.sleep(random.uniform(2.0, 3.5))
+    for tag in TAGS:
+        jobs = fetch_remoteok(tag)
+        all_jobs.extend(jobs)
 
-    # Deduplicate by URL
+    # Deduplicate by job ID
     seen = set()
     deduped = []
-    for r in all_results:
-        key = r.get("url") or r["title"].lower()
-        if key not in seen:
-            seen.add(key)
-            deduped.append(r)
+    for job in all_jobs:
+        job_id = job.get("id")
+        if job_id and job_id not in seen:
+            seen.add(job_id)
+            deduped.append(job)
 
-    # Enrich with company/salary from individual pages
-    deduped = enrich_listings(deduped)
+    # Filter to relevant roles only
+    relevant = [j for j in deduped if is_relevant(j)]
+    print(f"\n[RemoteOK] {len(relevant)} relevant jobs after filtering")
 
-    # Sort newest first
-    deduped.sort(key=lambda x: x.get("posted", ""), reverse=True)
+    # Format and sort newest first
+    formatted = [format_job(j) for j in relevant]
+    formatted.sort(key=lambda x: x.get("posted", ""), reverse=True)
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "last_updated": datetime.now().isoformat(),
         "params": {
-            "city":    "San Francisco, CA",
-            "queries": QUERIES,
+            "source":   "RemoteOK",
+            "tags":     TAGS,
+            "keywords": KEYWORDS,
         },
-        "count":    len(deduped),
-        "listings": deduped,
+        "count":    len(formatted),
+        "listings": formatted,
     }
 
     with open(OUTPUT_PATH, "w") as f:
         json.dump(payload, f, indent=2)
 
-    print(f"\n✓ Done. {len(deduped)} listings written to {OUTPUT_PATH}")
+    print(f"✓ Done. {len(formatted)} listings written to {OUTPUT_PATH}")
     return payload
 
 
