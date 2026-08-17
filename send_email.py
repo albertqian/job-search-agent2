@@ -23,13 +23,14 @@ def build_email(data: dict) -> tuple[str, str]:
     timestamp    = datetime.now().strftime("%A, %B %-d · %-I:%M %p")
     with_salary  = sum(1 for l in listings if l.get("salary"))
     with_company = sum(1 for l in listings if l.get("company"))
+    sources      = ", ".join(data.get("params", {}).get("sources", ["Indeed", "LinkedIn", "Glassdoor"]))
 
-    subject = f"💼 {count} PMM Job Leads · San Francisco · {datetime.now().strftime('%b %-d')}"
+    subject = f"💼 {count} PMM Jobs · Remote · {datetime.now().strftime('%b %-d')}"
 
     if not listings:
         rows_html = """
         <tr>
-          <td colspan="5" style="padding:32px;text-align:center;color:#6b7280;font-size:14px;">
+          <td colspan="6" style="padding:32px;text-align:center;color:#6b7280;font-size:14px;">
             No listings found for this run.
           </td>
         </tr>
@@ -40,16 +41,20 @@ def build_email(data: dict) -> tuple[str, str]:
             title   = l.get("title", "Unknown")
             company = l.get("company") or "<span style='color:#9ca3af'>—</span>"
             salary  = l.get("salary")  or "<span style='color:#9ca3af'>—</span>"
+            location= l.get("location") or "Remote"
             posted  = l.get("posted")  or "—"
+            source  = l.get("source")  or "—"
             url     = l.get("url", "")
             link    = f'<a href="{url}" style="color:#1a1a2e;font-weight:600;text-decoration:none;">View →</a>' if url else "—"
 
             rows.append(f"""
             <tr style="border-bottom:1px solid #f3f4f6;">
-              <td style="padding:12px 8px;font-size:14px;font-weight:600;color:#1a1a2e;">{title}</td>
+              <td style="padding:12px 8px;font-size:14px;font-weight:600;color:#1a1a2e;min-width:180px;">{title}</td>
               <td style="padding:12px 8px;font-size:13px;color:#4b5563;">{company}</td>
-              <td style="padding:12px 8px;font-size:13px;color:#065f46;font-weight:500;">{salary}</td>
+              <td style="padding:12px 8px;font-size:13px;color:#065f46;font-weight:500;white-space:nowrap;">{salary}</td>
+              <td style="padding:12px 8px;font-size:13px;color:#6b7280;">{location}</td>
               <td style="padding:12px 8px;font-size:13px;color:#6b7280;">{posted}</td>
+              <td style="padding:12px 8px;font-size:12px;color:#9ca3af;">{source}</td>
               <td style="padding:12px 8px;font-size:13px;">{link}</td>
             </tr>
             """)
@@ -62,17 +67,17 @@ def build_email(data: dict) -> tuple[str, str]:
 <body style="margin:0;padding:0;background:#f9fafb;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:32px 0;">
     <tr><td align="center">
-      <table width="680" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+      <table width="760" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
 
         <tr>
           <td style="background:#1a1a2e;padding:28px 32px;">
             <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">💼 PMM Job Leads</p>
-            <p style="margin:6px 0 0;font-size:13px;color:#9ca3af;">San Francisco Bay Area · {timestamp}</p>
+            <p style="margin:6px 0 0;font-size:13px;color:#9ca3af;">Remote · {sources} · {timestamp}</p>
           </td>
         </tr>
 
         <tr>
-          <td style="padding:24px 32px;">
+          <td style="padding:24px 32px 16px;">
             <table cellpadding="0" cellspacing="0">
               <tr>
                 <td style="padding-right:40px;">
@@ -100,7 +105,9 @@ def build_email(data: dict) -> tuple[str, str]:
                   <th style="padding:10px 8px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Title</th>
                   <th style="padding:10px 8px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Company</th>
                   <th style="padding:10px 8px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Salary</th>
+                  <th style="padding:10px 8px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Location</th>
                   <th style="padding:10px 8px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Posted</th>
+                  <th style="padding:10px 8px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Source</th>
                   <th style="padding:10px 8px;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;">Link</th>
                 </tr>
               </thead>
@@ -114,7 +121,7 @@ def build_email(data: dict) -> tuple[str, str]:
         <tr>
           <td style="padding:20px 32px;border-top:1px solid #f3f4f6;background:#f9fafb;">
             <p style="margin:0;font-size:12px;color:#9ca3af;">
-              Sent by your Job Leads agent · Craigslist SF Bay Area · Weekdays at 9 AM Pacific
+              Sent by your Job Leads agent · Indeed + LinkedIn + Glassdoor · Weekdays at 9 AM Pacific
             </p>
           </td>
         </tr>
