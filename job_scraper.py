@@ -1,13 +1,13 @@
 """
 job_scraper.py
 Fetches product marketing jobs using JobSpy.
-Searches Indeed, LinkedIn, and Glassdoor simultaneously.
-No API key required.
+Sources: Indeed + LinkedIn only (Glassdoor blocks GitHub Actions IPs).
 """
 
 import json
+import math
 import pandas as pd
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from jobspy import scrape_jobs
@@ -21,12 +21,25 @@ SEARCHES = [
     "PMM",
 ]
 
+TITLE_MUST_INCLUDE = [
+    "product marketing",
+    "pmm",
+    "product marketer",
+]
+
+TITLE_EXCLUDE = [
+    "engineer", "developer", "software", "data",
+    "designer", "devops", "backend", "frontend",
+    "analyst", "recruiter", "sales", "finance",
+    "customer success", "customer support",
+]
+
 
 def fetch_jobs(search_term: str) -> pd.DataFrame:
     print(f"[JobSpy] Searching: '{search_term}'")
     try:
         jobs = scrape_jobs(
-            site_name=["indeed", "linkedin", "glassdoor"],
+            site_name=["indeed", "linkedin"],
             search_term=search_term,
             location="Remote",
             results_wanted=25,
@@ -42,47 +55,57 @@ def fetch_jobs(search_term: str) -> pd.DataFrame:
 
 def is_relevant(title: str) -> bool:
     title = title.lower()
-    must_include = [
-        "product marketing",
-        "pmm",
-        "product marketer",
-    ]
-    exclude = [
-        "engineer", "developer", "software", "data",
-        "designer", "devops", "backend", "frontend",
-        "analyst", "recruiter", "sales", "finance",
-        "customer success", "customer support",
-    ]
-    if not any(kw in title for kw in must_include):
+    if not any(kw in title for kw in TITLE_MUST_INCLUDE):
         return False
-    if any(kw in title for kw in exclude):
+    if any(kw in title for kw in TITLE_EXCLUDE):
         return False
     return True
 
 
-def format_job(row) -> dict:
-    # Salary
-    salary = None
-    min_sal = row.get("min_amount")
-    max_sal = row.get("max_amount")
-    interval = row.get("interval", "")
-    if min_sal and max_sal:
-        salary = f"${int(min_sal):,} – ${int(max_sal):,} / {interval}"
-    elif min_sal:
-        salary = f"${int(min_sal):,}+ / {interval}"
+def safe_int(val) -> int | None:
+    """Convert to int safely — handles NaN, None, and empty strings."""
+    try:
+        if val is None:
+            return None
+        if isinstance(val, float) and math.isnan(val):
+            return None
+        return int(val)
+    except (ValueError, TypeError):
+        return None
 
-    # Date
+
+def format_job(row) -> dict:
+    min_sal  = safe_int(row.get("min_amount"))
+    max_sal  = safe_int(row.get("max_amount"))
+    interval = row.get("interval") or ""
+    interval = "" if (isinstance(interval, float) and math.isnan(interval)) else interval
+
+    if min_sal and max_sal:
+        salary = f"${min_sal:,} – ${max_sal:,} / {interval}".strip(" /")
+    elif min_sal:
+        salary = f"${min_sal:,}+ / {interval}".strip(" /")
+    else:
+        salary = None
+
     date_posted = row.get("date_posted")
     if hasattr(date_posted, "strftime"):
         posted = date_posted.strftime("%b %d, %Y")
     else:
-        posted = str(date_posted) if date_posted else ""
+        posted = str(date_posted) if date_posted and not (isinstance(date_posted, float) and math.isnan(date_posted)) else ""
+
+    location = row.get("location") or "Remote"
+    if isinstance(location, float) and math.isnan(location):
+        location = "Remote"
+
+    company = row.get("company") or None
+    if isinstance(company, float):
+        company = None
 
     return {
         "title":      str(row.get("title", "Unknown")),
-        "company":    str(row.get("company", "")) or None,
+        "company":    company,
         "salary":     salary,
-        "location":   str(row.get("location", "Remote")),
+        "location":   str(location),
         "source":     str(row.get("site", "")).title(),
         "url":        str(row.get("job_url", "")),
         "posted":     posted,
@@ -111,17 +134,14 @@ def run_scraper():
             json.dump(payload, f, indent=2)
         return payload
 
-    # Combine and deduplicate by job URL
     combined = pd.concat(all_frames, ignore_index=True)
     combined = combined.drop_duplicates(subset=["job_url"], keep="first")
     print(f"\n[JobSpy] {len(combined)} unique jobs before title filter")
 
-    # Filter by title relevance
     mask     = combined["title"].apply(lambda t: is_relevant(str(t)))
     relevant = combined[mask]
     print(f"[JobSpy] {len(relevant)} PMM-specific jobs after filter")
 
-    # Format
     formatted = [format_job(row) for _, row in relevant.iterrows()]
     formatted.sort(key=lambda x: x.get("posted", ""), reverse=True)
 
@@ -131,7 +151,7 @@ def run_scraper():
         "params": {
             "searches": SEARCHES,
             "days_back": DAYS_BACK,
-            "sources": ["indeed", "linkedin", "glassdoor"],
+            "sources": ["Indeed", "LinkedIn"],
         },
         "count":    len(formatted),
         "listings": formatted,
