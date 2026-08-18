@@ -18,8 +18,8 @@ from jobspy import scrape_jobs
 OUTPUT_PATH  = Path("data/job_results.json")
 SEEN_PATH    = Path("data/seen_urls.json")
 DAYS_BACK    = 14
-MIN_SCORE    = 70   # only email listings at or above this score
-COVER_LETTER_THRESHOLD = 75  # generate cover letter for these
+MIN_SCORE    = 80   # only email listings at or above this score
+COVER_LETTER_THRESHOLD = 85  # generate cover letter for these
 
 SEARCHES = [
     "product marketing manager",
