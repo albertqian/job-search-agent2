@@ -2,7 +2,7 @@ name: Job Leads — Daily Email
 
 on:
   schedule:
-    - cron: "0 16 * * 1-5"   # 9 AM Pacific, weekdays only
+    - cron: "0 16 * * 1-5"
 
   workflow_dispatch:
 
@@ -27,20 +27,13 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python job_scraper.py
 
-      - name: Commit seen_urls.json to persist deduplication
-        env:
-          PAT: ${{ secrets.JOB_GH_PAT }}
-        run: |
-          git config user.name "job-leads-bot"
-          git config user.email "bot@job-leads"
-          git remote set-url origin https://x-access-token:${PAT}@github.com/${{ github.repository }}.git
-          git add data/seen_urls.json
-          git diff --cached --quiet || git commit -m "chore: update seen URLs [$(date -u '+%Y-%m-%d %H:%M UTC')]"
-          git push
-
       - name: Send email digest
         env:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
           TO_ADDRESS:     ${{ secrets.TO_ADDRESS }}
         run: python send_email.py
+
+      - name: Commit seen_urls.json
+        run: |
+          echo "Skipping commit — PAT issue being resolved separately"
