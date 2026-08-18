@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: "0 16 * * 1-5"   # 9 AM Pacific, weekdays only
 
-  workflow_dispatch:          # manual trigger from Actions UI
+  workflow_dispatch:
 
 jobs:
   scrape-and-email:
@@ -22,8 +22,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Scrape Craigslist jobs
+      - name: Scrape, score, and generate cover letters
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python job_scraper.py
+
+      - name: Commit seen_urls.json to persist deduplication
+        env:
+          PAT: ${{ secrets.JOB_GH_PAT }}
+        run: |
+          git config user.name "job-leads-bot"
+          git config user.email "bot@job-leads"
+          git remote set-url origin https://x-access-token:${PAT}@github.com/${{ github.repository }}.git
+          git add data/seen_urls.json
+          git diff --cached --quiet || git commit -m "chore: update seen URLs [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          git push
 
       - name: Send email digest
         env:
